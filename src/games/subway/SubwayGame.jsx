@@ -25,12 +25,10 @@ const NeonMaterial = ({ color }) => (
 
 const Player = () => {
     const mesh = useRef()
-    const trailRef = useRef()
-    // Game state
-    const [lane, setLane] = useState(0) // -1, 0, 1
-    const [jumping, setJumping] = useState(false)
+    const isJumping = useRef(false)
     const yVelocity = useRef(0)
     const xPos = useRef(0)
+    const lane = useRef(0)
 
     // Store
     const { currentGameState, endGame, addScore } = useGameStore()
@@ -39,50 +37,52 @@ const Player = () => {
     // Controls
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (!playing) return
-            if (e.key === 'ArrowLeft') setLane(l => Math.max(-1, l - 1))
-            if (e.key === 'ArrowRight') setLane(l => Math.min(1, l + 1))
-            if (e.key === 'ArrowUp' && !jumping) {
-                setJumping(true)
+            if (currentGameState !== 'playing') return
+
+            if (e.key === 'ArrowLeft') lane.current = Math.max(-1, lane.current - 1)
+            if (e.key === 'ArrowRight') lane.current = Math.min(1, lane.current + 1)
+
+            if ((e.key === 'ArrowUp' || e.code === 'Space') && !isJumping.current) {
+                isJumping.current = true
                 yVelocity.current = JUMP_FORCE
             }
         }
+
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [jumping, playing])
+    }, [currentGameState])
 
     // Physics Loop
     useFrame((state, delta) => {
         if (!playing || !mesh.current) return
 
         // Smooth X Movement (Lerp)
-        const targetX = lane * LANE_WIDTH
+        const targetX = lane.current * LANE_WIDTH
         xPos.current = THREE.MathUtils.lerp(xPos.current, targetX, delta * 15)
         mesh.current.position.x = xPos.current
 
         // Jumping Physics
-        if (jumping || mesh.current.position.y > 0.5) {
+        if (isJumping.current || mesh.current.position.y > 0.5) {
             mesh.current.position.y += yVelocity.current * delta
             yVelocity.current -= GRAVITY * delta
 
             if (mesh.current.position.y <= 0.5) {
                 mesh.current.position.y = 0.5
-                setJumping(false)
+                isJumping.current = false
                 yVelocity.current = 0
             }
         }
 
         // Tilt Effect
         mesh.current.rotation.z = (xPos.current - targetX) * -0.1
-        mesh.current.rotation.x = -jumping ? 0.2 : 0
+        mesh.current.rotation.x = isJumping.current ? -0.2 : 0
 
         // Collision Check
         if (window.gameObstacles) {
             for (let obs of window.gameObstacles) {
-                // Approximate AABB
                 const dx = Math.abs(mesh.current.position.x - obs.x)
                 const dz = Math.abs(mesh.current.position.z - obs.z) // Player at Z=0
-                const dy = Math.abs(mesh.current.position.y - 0.5) // Player pivot at bottom
+                const dy = Math.abs(mesh.current.position.y - 0.5)
 
                 if (dz < 1.2 && dx < 1.0 && dy < 1.0) {
                     if (obs.type === 'obstacle') {
@@ -90,12 +90,8 @@ const Player = () => {
                     } else if (obs.type === 'coin' && !obs.hit) {
                         obs.hit = true
                         obs.visible = false
-                        addScore(50) // Bonus points
-                        confetti({
-                            particleCount: 50,
-                            spread: 60,
-                            origin: { y: 0.7 }
-                        })
+                        addScore(50)
+                        confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } })
                     }
                 }
             }
@@ -125,8 +121,6 @@ const Player = () => {
 
 const ObstacleManager = () => {
     const group = useRef()
-
-    // Pool of obstacles
     const obstaclePool = useMemo(() => {
         return new Array(25).fill(null).map((_, i) => ({
             id: i,
@@ -148,20 +142,16 @@ const ObstacleManager = () => {
     useFrame((state, delta) => {
         if (!playing) return
 
-        // Slightly increase speed
         speed.current += delta * 0.1
 
-        // Move obstacles
         obstaclePool.forEach(obs => {
             obs.z += speed.current * delta
 
-            // Passed player check (Player is at Z=0)
             if (obs.z > 2 && !obs.passed && obs.type === 'obstacle') {
                 obs.passed = true
                 addScore(10) // Score for avoiding obstacle
             }
 
-            // Respawn
             if (obs.z > 20) {
                 obs.z = SPAWN_DISTANCE - Math.random() * 20
                 obs.x = (Math.floor(Math.random() * 3) - 1) * LANE_WIDTH
@@ -171,15 +161,12 @@ const ObstacleManager = () => {
                 obs.visible = true
             }
 
-            // Visual Update
             if (obs.ref.current) {
                 obs.ref.current.position.set(obs.x, 0.5, obs.z)
                 obs.ref.current.visible = obs.visible
-
             }
         })
 
-        // Update global for collision
         window.gameObstacles = obstaclePool
     })
 
@@ -208,7 +195,6 @@ const ObstacleManager = () => {
 }
 
 const EnvironmentScene = () => {
-    // Moving floor grid to simulate speed
     const gridRef = useRef()
     useFrame((state, delta) => {
         if (gridRef.current) {
@@ -224,7 +210,6 @@ const EnvironmentScene = () => {
             <pointLight position={[10, 10, 10]} intensity={1} color="#00ffcc" />
             <pointLight position={[-10, 10, -10]} intensity={1} color="#ff0055" />
 
-            {/* Floor */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, -50]} receiveShadow>
                 <planeGeometry args={[100, 300]} />
                 <meshStandardMaterial color="#0f172a" roughness={0.1} metalness={0.8} />
@@ -233,7 +218,6 @@ const EnvironmentScene = () => {
                 <gridHelper args={[100, 100, 0x00ffcc, 0x222222]} position={[0, 0, -50]} />
             </group>
 
-            {/* City Silhouette / Deco */}
             {[-30, 30].map((x, i) => (
                 <group key={i} position={[x, 0, -50]}>
                     {new Array(10).fill(0).map((_, j) => (
@@ -254,7 +238,6 @@ const NeonRush = () => {
 
     useEffect(() => {
         reset()
-        // Wait a beat before starting to ensure scene is ready? Not strictly necessary but good for transitions
         startGame()
         return () => { delete window.gameObstacles }
     }, [])
@@ -270,14 +253,13 @@ const NeonRush = () => {
                 <ObstacleManager />
             </Canvas>
 
-            {/* HUD */}
             <div className="ui-overlay" style={{ pointerEvents: 'none' }}>
                 <div style={{
                     position: 'absolute', top: '20px', left: '20px',
                     fontSize: '32px', fontWeight: 'bold',
                     color: '#00ffcc', textShadow: '0 0 10px #00ffcc'
                 }}>
-                    SCORE: {score}
+                    SCORE: {Math.floor(score / 10)}
                 </div>
 
                 {isGameOver && (

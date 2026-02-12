@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import GameHub from './GameHub';
-import NeonRush from './games/subway/SubwayGame'; // This is now the combined game
-import StackGame from './games/stack/StackGame';
+import NeonRush from './games/subway/SubwayGame';
+import TunnelGame from './games/tunnel/TunnelGame'; // Replacing StackGame
 
 function App() {
   return (
@@ -10,7 +10,7 @@ function App() {
         <Routes>
           <Route path="/" element={<GameHub />} />
           <Route path="/runner" element={<NeonRush />} />
-          <Route path="/stack" element={<StackGame />} />
+          <Route path="/tunnel" element={<TunnelGame />} />
         </Routes>
       </div>
     </BrowserRouter>

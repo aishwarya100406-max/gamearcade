@@ -138,11 +138,11 @@ const GameHub = () => {
                     description="High-speed reflex challenge. Dodge obstacles in the cyber city."
                 />
                 <GameCard
-                    title="COSMIC STACK"
-                    emoji="🏗️"
+                    title="NEON TUNNEL"
+                    emoji="🌀"
                     color="#ec4899"
-                    path="/stack"
-                    description="Build the tallest tower in the galaxy. One block at a time."
+                    path="/tunnel"
+                    description="High speed rotation. Dodge the blocks in the cyber tube."
                 />
             </div>
 
