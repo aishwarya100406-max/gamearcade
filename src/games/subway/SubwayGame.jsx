@@ -1,31 +1,45 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { PerspectiveCamera, Environment, Text, useTexture } from '@react-three/drei'
+import { PerspectiveCamera, Environment, Stars, Trail, Sparkles, Float } from '@react-three/drei'
 import * as THREE from 'three'
-import { useGameStore } from '../../store' // Adjust path if needed
+import { useGameStore } from '../../store'
 import { useNavigate } from 'react-router-dom'
+import confetti from 'canvas-confetti'
 
-// --- Constants ---
-const LANE_WIDTH = 2
-const PLAYER_SPEED = 15 // Units per second
+const LANE_WIDTH = 3
+const PLAYER_SPEED = 20
 const JUMP_FORCE = 8
 const GRAVITY = 20
-const SPAWN_DISTANCE = -100
-const DESPAWN_DISTANCE = 10
+const SPAWN_DISTANCE = -120
 
-// --- Player Component ---
+// --- Utility Components ---
+const NeonMaterial = ({ color }) => (
+    <meshStandardMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={2}
+        roughness={0.2}
+        metalness={0.8}
+    />
+)
+
 const Player = () => {
     const mesh = useRef()
+    const trailRef = useRef()
+    // Game state
     const [lane, setLane] = useState(0) // -1, 0, 1
     const [jumping, setJumping] = useState(false)
     const yVelocity = useRef(0)
     const xPos = useRef(0)
 
-    const { gameOver, endGame, addScore } = useGameStore()
+    // Store
+    const { currentGameState, endGame, addScore } = useGameStore()
+    const playing = currentGameState === 'playing'
 
+    // Controls
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (gameOver) return
+            if (!playing) return
             if (e.key === 'ArrowLeft') setLane(l => Math.max(-1, l - 1))
             if (e.key === 'ArrowRight') setLane(l => Math.min(1, l + 1))
             if (e.key === 'ArrowUp' && !jumping) {
@@ -35,17 +49,18 @@ const Player = () => {
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [jumping, gameOver])
+    }, [jumping, playing])
 
+    // Physics Loop
     useFrame((state, delta) => {
-        if (!mesh.current || gameOver) return
+        if (!playing || !mesh.current) return
 
-        // Lateral Movement (Lerp)
+        // Smooth X Movement (Lerp)
         const targetX = lane * LANE_WIDTH
         xPos.current = THREE.MathUtils.lerp(xPos.current, targetX, delta * 15)
         mesh.current.position.x = xPos.current
 
-        // Jumping (Physics)
+        // Jumping Physics
         if (jumping || mesh.current.position.y > 0.5) {
             mesh.current.position.y += yVelocity.current * delta
             yVelocity.current -= GRAVITY * delta
@@ -57,22 +72,30 @@ const Player = () => {
             }
         }
 
-        // Check collisions with global obstacles (exposed via window or context for simplicity in this file)
-        // For a cleaner React app, we'd use a Context, but window is fast for game loop access
+        // Tilt Effect
+        mesh.current.rotation.z = (xPos.current - targetX) * -0.1
+        mesh.current.rotation.x = -jumping ? 0.2 : 0
+
+        // Collision Check
         if (window.gameObstacles) {
             for (let obs of window.gameObstacles) {
-                // Simple AABB collision
+                // Approximate AABB
                 const dx = Math.abs(mesh.current.position.x - obs.x)
-                const dz = Math.abs(mesh.current.position.z - obs.z) // Player z is 0
-                const dy = Math.abs(mesh.current.position.y - 0.5) // Obstacle y is 0.5
+                const dz = Math.abs(mesh.current.position.z - obs.z) // Player at Z=0
+                const dy = Math.abs(mesh.current.position.y - 0.5) // Player pivot at bottom
 
-                if (dz < 1 && dx < 0.8 && dy < 1) {
+                if (dz < 1.2 && dx < 1.0 && dy < 1.0) {
                     if (obs.type === 'obstacle') {
                         endGame()
                     } else if (obs.type === 'coin' && !obs.hit) {
                         obs.hit = true
-                        obs.visible = false // Hide visually
-                        addScore(10)
+                        obs.visible = false
+                        addScore(50) // Bonus points
+                        confetti({
+                            particleCount: 50,
+                            spread: 60,
+                            origin: { y: 0.7 }
+                        })
                     }
                 }
             }
@@ -80,142 +103,224 @@ const Player = () => {
     })
 
     return (
-        <mesh ref={mesh} position={[0, 0.5, 0]} castShadow>
-            <boxGeometry args={[0.8, 1, 0.8]} />
-            <meshStandardMaterial color="#00ffcc" emissive="#00ffcc" emissiveIntensity={0.5} />
-        </mesh>
+        <group ref={mesh}>
+            <Trail width={1.5} length={5} color="#00ffcc" attenuation={(t) => t * t}>
+                <mesh position={[0, 0.5, 0]} castShadow>
+                    <boxGeometry args={[0.8, 0.8, 1.5]} />
+                    <NeonMaterial color="#00ffcc" />
+                </mesh>
+            </Trail>
+            {/* Wheels or Hover pads */}
+            <mesh position={[-0.4, 0.2, 0.5]}>
+                <cylinderGeometry args={[0.2, 0.2, 0.2]} rotation={[0, 0, Math.PI / 2]} />
+                <NeonMaterial color="#ffffff" />
+            </mesh>
+            <mesh position={[0.4, 0.2, 0.5]}>
+                <cylinderGeometry args={[0.2, 0.2, 0.2]} rotation={[0, 0, Math.PI / 2]} />
+                <NeonMaterial color="#ffffff" />
+            </mesh>
+        </group>
     )
 }
 
-// --- Obstacle Manager ---
 const ObstacleManager = () => {
     const group = useRef()
+
+    // Pool of obstacles
     const obstaclePool = useMemo(() => {
-        return new Array(20).fill(null).map((_, i) => ({
+        return new Array(25).fill(null).map((_, i) => ({
             id: i,
             ref: React.createRef(),
             x: 0,
-            z: SPAWN_DISTANCE - (i * 10), // Initial spacing
-            type: Math.random() > 0.5 ? 'obstacle' : 'coin',
+            z: SPAWN_DISTANCE - (i * 15),
+            type: Math.random() > 0.7 ? 'coin' : 'obstacle',
             active: true,
             hit: false,
-            visible: true
+            visible: true,
+            passed: false
         }))
     }, [])
 
-    const { gameOver, addScore } = useGameStore()
+    const { currentGameState, addScore } = useGameStore()
     const speed = useRef(PLAYER_SPEED)
+    const playing = currentGameState === 'playing'
 
     useFrame((state, delta) => {
-        if (gameOver) return
+        if (!playing) return
 
-        // Expose to player for collision
-        window.gameObstacles = obstaclePool.map(o => ({
-            x: o.x,
-            z: o.z,
-            type: o.type,
-            hit: o.hit,
-            visible: o.visible
-        }))
+        // Slightly increase speed
+        speed.current += delta * 0.1
 
         // Move obstacles
-        speed.current += delta * 0.1 // Acccelerate
-
         obstaclePool.forEach(obs => {
             obs.z += speed.current * delta
 
-            if (obs.z > DESPAWN_DISTANCE) {
-                // Respawn
-                obs.z = SPAWN_DISTANCE
+            // Passed player check (Player is at Z=0)
+            if (obs.z > 2 && !obs.passed && obs.type === 'obstacle') {
+                obs.passed = true
+                addScore(10) // Score for avoiding obstacle
+            }
+
+            // Respawn
+            if (obs.z > 20) {
+                obs.z = SPAWN_DISTANCE - Math.random() * 20
                 obs.x = (Math.floor(Math.random() * 3) - 1) * LANE_WIDTH
-                obs.type = Math.random() > 0.7 ? 'coin' : 'obstacle'
+                obs.type = Math.random() > 0.8 ? 'coin' : 'obstacle'
                 obs.hit = false
+                obs.passed = false
                 obs.visible = true
             }
 
-            // Update Mesh
+            // Visual Update
             if (obs.ref.current) {
                 obs.ref.current.position.set(obs.x, 0.5, obs.z)
                 obs.ref.current.visible = obs.visible
 
-                // Color update based on type
-                obs.ref.current.material.color.set(obs.type === 'coin' ? 'gold' : '#ff3366')
             }
         })
 
-        // Score over time
-        if (Math.frameCount % 60 === 0) addScore(1)
+        // Update global for collision
+        window.gameObstacles = obstaclePool
     })
 
     return (
         <group ref={group}>
             {obstaclePool.map(obs => (
-                <mesh key={obs.id} ref={obs.ref} castShadow>
-                    <boxGeometry args={[1, 1, 1]} />
-                    <meshStandardMaterial />
-                </mesh>
+                <group key={obs.id} ref={obs.ref}>
+                    {obs.type === 'obstacle' ? (
+                        <mesh castShadow receiveShadow position={[0, 0.5, 0]}>
+                            <boxGeometry args={[1.5, 1.5, 1.5]} />
+                            <NeonMaterial color="#ff0055" />
+                        </mesh>
+                    ) : (
+                        <Float speed={5} rotationIntensity={2} floatIntensity={2}>
+                            <mesh castShadow receiveShadow position={[0, 1, 0]} rotation={[0, Math.PI / 4, 0]}>
+                                <torusGeometry args={[0.4, 0.1, 16, 32]} />
+                                <NeonMaterial color="#ffd700" />
+                            </mesh>
+                            <Sparkles count={5} scale={2} size={4} speed={0.4} opacity={1} color="yellow" />
+                        </Float>
+                    )}
+                </group>
             ))}
         </group>
     )
 }
 
-const Floor = () => {
-    const texture = useRef()
+const EnvironmentScene = () => {
+    // Moving floor grid to simulate speed
+    const gridRef = useRef()
     useFrame((state, delta) => {
-        // Scroll texture logic if we had one
+        if (gridRef.current) {
+            gridRef.current.position.z = (state.clock.elapsedTime * 20) % 20
+        }
     })
+
     return (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -50]} receiveShadow>
-            <planeGeometry args={[20, 200]} />
-            <meshStandardMaterial color="#1e293b" roughnes={0.8} />
-            <gridHelper args={[20, 200, 0xffffff, 0x555555]} rotation={[-Math.PI / 2, 0, 0]} />
-        </mesh>
+        <>
+            <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
+            <fog attach="fog" args={['#0f172a', 20, 90]} />
+            <ambientLight intensity={0.5} />
+            <pointLight position={[10, 10, 10]} intensity={1} color="#00ffcc" />
+            <pointLight position={[-10, 10, -10]} intensity={1} color="#ff0055" />
+
+            {/* Floor */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, -50]} receiveShadow>
+                <planeGeometry args={[100, 300]} />
+                <meshStandardMaterial color="#0f172a" roughness={0.1} metalness={0.8} />
+            </mesh>
+            <group ref={gridRef}>
+                <gridHelper args={[100, 100, 0x00ffcc, 0x222222]} position={[0, 0, -50]} />
+            </group>
+
+            {/* City Silhouette / Deco */}
+            {[-30, 30].map((x, i) => (
+                <group key={i} position={[x, 0, -50]}>
+                    {new Array(10).fill(0).map((_, j) => (
+                        <mesh key={j} position={[0, 10 + Math.random() * 10, -j * 30]}>
+                            <boxGeometry args={[10, 40 + Math.random() * 20, 10]} />
+                            <meshStandardMaterial color="#1e293b" emissive="#334155" emissiveIntensity={0.2} />
+                        </mesh>
+                    ))}
+                </group>
+            ))}
+        </>
     )
 }
 
-
-const SubwayGame = () => {
-    const { score, gameOver, reset, startGame } = useGameStore()
+const NeonRush = () => {
+    const { score, currentGameState, startGame, reset, highScore } = useGameStore()
     const navigate = useNavigate()
 
     useEffect(() => {
         reset()
+        // Wait a beat before starting to ensure scene is ready? Not strictly necessary but good for transitions
         startGame()
-        // Cleanup window.gameObstacles
         return () => { delete window.gameObstacles }
     }, [])
 
-    return (
-        <div style={{ width: '100%', height: '100vh', background: '#000' }}>
-            <Canvas shadows dpr={[1, 2]}>
-                <PerspectiveCamera makeDefault position={[0, 4, 6]} fov={60} rotation={[-0.4, 0, 0]} />
-                <ambientLight intensity={0.5} />
-                <directionalLight position={[10, 20, 5]} intensity={1} castShadow />
-                <fog attach="fog" args={['#0f172a', 10, 50]} />
+    const isGameOver = currentGameState === 'gameover'
 
+    return (
+        <div style={{ width: '100%', height: '100vh', background: '#000', position: 'relative' }}>
+            <Canvas shadows dpr={[1, 2]} camera={{ position: [0, 5, 8], fov: 60 }}>
+                <PerspectiveCamera makeDefault position={[0, 5, 10]} fov={60} rotation={[-0.2, 0, 0]} />
+                <EnvironmentScene />
                 <Player />
                 <ObstacleManager />
-                <Floor />
-
-                <gridHelper args={[20, 200]} position={[0, 0.01, -50]} />
             </Canvas>
 
+            {/* HUD */}
             <div className="ui-overlay" style={{ pointerEvents: 'none' }}>
-                <div style={{ padding: '20px', fontSize: '24px', fontWeight: 'bold' }}>SCORE: {Math.floor(score)}</div>
-                {gameOver && (
+                <div style={{
+                    position: 'absolute', top: '20px', left: '20px',
+                    fontSize: '32px', fontWeight: 'bold',
+                    color: '#00ffcc', textShadow: '0 0 10px #00ffcc'
+                }}>
+                    SCORE: {score}
+                </div>
+
+                {isGameOver && (
                     <div style={{
                         position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                        background: 'rgba(15, 23, 42, 0.9)', padding: '40px', borderRadius: '16px', textAlign: 'center', pointerEvents: 'auto',
-                        border: '1px solid #334155', boxShadow: '0 0 50px rgba(0,0,0,0.5)'
+                        background: 'rgba(15, 23, 42, 0.95)', padding: '60px', borderRadius: '24px', textAlign: 'center', pointerEvents: 'auto',
+                        border: '2px solid #ff0055', boxShadow: '0 0 50px rgba(255, 0, 85, 0.3)',
+                        backdropFilter: 'blur(10px)', minWidth: '400px'
                     }}>
-                        <h2 style={{ fontSize: '48px', margin: '0 0 20px 0', color: '#ff3366' }}>GAME OVER</h2>
-                        <div style={{ fontSize: '24px', marginBottom: '30px' }}>Score: {Math.floor(score)}</div>
-                        <button onClick={() => window.location.reload()} style={{
-                            background: '#3b82f6', border: 'none', padding: '12px 30px', color: 'white', borderRadius: '8px', fontSize: '18px', cursor: 'pointer', marginRight: '10px'
-                        }}>RETRY</button>
-                        <button onClick={() => navigate('/')} style={{
-                            background: 'transparent', border: '1px solid #cbd5e1', padding: '12px 30px', color: 'white', borderRadius: '8px', fontSize: '18px', cursor: 'pointer'
-                        }}>MENU</button>
+                        <h1 style={{
+                            fontSize: '64px', margin: '0 0 20px 0',
+                            background: 'linear-gradient(to right, #ff0055, #ffcc00)',
+                            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                            textTransform: 'uppercase', fontStyle: 'italic'
+                        }}>
+                            CRASHED!
+                        </h1>
+
+                        <div style={{ fontSize: '24px', color: '#94a3b8', marginBottom: '10px' }}>OBSTACLES AVOIDED</div>
+                        <div style={{ fontSize: '72px', color: '#fff', fontWeight: 'bold', marginBottom: '40px', lineHeight: 1 }}>
+                            {Math.floor(score / 10)}
+                        </div>
+
+                        <div style={{ fontSize: '18px', color: '#64748b', marginBottom: '40px' }}>
+                            HIGH SCORE: {Math.floor(highScore / 10)}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
+                            <button onClick={() => window.location.reload()} style={{
+                                background: '#00ffcc', border: 'none', padding: '16px 40px',
+                                color: '#0f172a', borderRadius: '12px', fontSize: '20px', fontWeight: 'bold',
+                                cursor: 'pointer', transition: 'transform 0.2s', boxShadow: '0 0 20px rgba(0, 255, 204, 0.4)'
+                            }}>
+                                PLAY AGAIN
+                            </button>
+                            <button onClick={() => navigate('/')} style={{
+                                background: 'transparent', border: '2px solid #334155', padding: '16px 40px',
+                                color: '#fff', borderRadius: '12px', fontSize: '20px', fontWeight: 'bold',
+                                cursor: 'pointer', transition: 'background 0.2s'
+                            }}>
+                                MENU
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
@@ -223,4 +328,4 @@ const SubwayGame = () => {
     )
 }
 
-export default SubwayGame
+export default NeonRush
