@@ -48,7 +48,7 @@ const Player = () => {
             if (e.key === 'ArrowLeft') lane.current = Math.max(-1, lane.current - 1)
             if (e.key === 'ArrowRight') lane.current = Math.min(1, lane.current + 1)
 
-            if ((e.key === 'ArrowUp' || e.code === 'Space') && !isJumping.current && mesh.current.position.y <= 0.51) {
+            if ((e.key === 'ArrowUp' || e.code === 'Space') && !isJumping.current && mesh.current && mesh.current.position.y <= 0.51) {
                 isJumping.current = true
                 yVelocity.current = JUMP_FORCE
             }
@@ -60,7 +60,7 @@ const Player = () => {
 
     // Physics Loop
     useFrame((state, delta) => {
-        if (!playing || !mesh.current) return
+        if (currentGameState !== 'playing' || !mesh.current) return
 
         // Smooth X Movement (Lerp)
         const targetX = lane.current * LANE_WIDTH
