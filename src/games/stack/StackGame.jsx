@@ -272,6 +272,20 @@ const StackGame = () => {
                         </div>
                     </div>
                 )}
+
+                {!currentGameState === 'gameover' && score === 0 && (
+                    <div style={{
+                        position: 'absolute', bottom: '100px', width: '100%', textAlign: 'center', pointerEvents: 'none',
+                        animation: 'fadeIn 0.5s ease-out'
+                    }}>
+                        <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#fff', textShadow: '0 0 10px #000', marginBottom: '10px' }}>
+                            STACK THE BLOCKS!
+                        </div>
+                        <div style={{ fontSize: '18px', color: 'rgba(255,255,255,0.8)', background: 'rgba(0,0,0,0.5)', display: 'inline-block', padding: '10px 20px', borderRadius: '20px' }}>
+                            Tap Space or Click to Drop
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     )
