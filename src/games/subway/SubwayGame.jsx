@@ -32,17 +32,23 @@ const Player = () => {
 
     // Store
     const { currentGameState, endGame, addScore } = useGameStore()
-    const playing = currentGameState === 'playing'
+
+    // Use a ref to track the current game state internally to avoid stale closures in listeners
+    const gameStateRef = useRef(currentGameState)
+    useEffect(() => {
+        gameStateRef.current = currentGameState
+    }, [currentGameState])
 
     // Controls
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (currentGameState !== 'playing') return
+            // Check ref instead of closure for most accurate state
+            if (gameStateRef.current !== 'playing') return
 
             if (e.key === 'ArrowLeft') lane.current = Math.max(-1, lane.current - 1)
             if (e.key === 'ArrowRight') lane.current = Math.min(1, lane.current + 1)
 
-            if ((e.key === 'ArrowUp' || e.code === 'Space') && !isJumping.current) {
+            if ((e.key === 'ArrowUp' || e.code === 'Space') && !isJumping.current && mesh.current.position.y <= 0.51) {
                 isJumping.current = true
                 yVelocity.current = JUMP_FORCE
             }
@@ -50,7 +56,7 @@ const Player = () => {
 
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [currentGameState])
+    }, []) // Listen for the entire lifecycle
 
     // Physics Loop
     useFrame((state, delta) => {
