@@ -10,7 +10,7 @@ import confetti from 'canvas-confetti'
 const TUBE_RADIUS = 5
 const TUBE_LENGTH = 100
 const SEGMENTS = 16
-const SPEED_INITIAL = 30
+const SPEED_INITIAL = 15
 const ROTATION_SPEED = 3
 
 // --- Components ---
@@ -108,7 +108,7 @@ const GameScene = () => {
         if (currentGameState !== 'playing') return
 
         // Update Speed
-        speed.current += delta * 0.5
+        speed.current += delta * 0.1
 
         // Update Rotation
         if (keys.current.left) setPlayerAngle(a => a + ROTATION_SPEED * delta)
